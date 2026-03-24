@@ -6,7 +6,7 @@ import httpx
 import hashlib
 
 from .config import CHROMA_PERSIST_DIR, CHUNK_SIZE, CHUNK_OVERLAP, EMBEDDING_API_KEY, EMBEDDING_API_BASE, EMBEDDING_MODEL
-from .parser import parse_all_papers, parse_paper, PaperSection
+from .parser import parse_all_papers, parse_pdf, PaperSection
 from .logger import get_logger
 from .errors import IndexError, handle_error
 
@@ -303,7 +303,7 @@ class Indexer:
             添加的文本块数量
         """
         try:
-            sections = parse_paper(file_path)
+            sections = parse_pdf(str(file_path))
             if not sections:
                 logger.warning(f"文件 {file_path} 未解析出任何内容")
                 return 0
