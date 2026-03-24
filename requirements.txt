@@ -1,0 +1,22 @@
+# RAG 框架
+llama-index>=0.10.0
+llama-index-llms-openai-like
+llama-index-embeddings-huggingface
+
+# 向量数据库
+chromadb>=0.4.0
+
+# 文档解析
+pymupdf>=1.23.0
+llama-index-readers-file
+
+# 嵌入模型
+sentence-transformers
+
+# 前端
+streamlit>=1.28.0
+
+# 工具
+python-dotenv
+pydantic
+httpx
