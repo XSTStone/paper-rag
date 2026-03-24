@@ -1,6 +1,6 @@
 """索引构建模块"""
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Set, Dict
 import chromadb
 import httpx
 import hashlib
