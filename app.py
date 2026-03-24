@@ -10,6 +10,7 @@ from src.indexer import Indexer
 from src.query_engine import QueryEngine
 from src.logger import setup_logger
 from src.errors import handle_error
+from src.watcher import PaperCache
 
 # 初始化日志
 logger = setup_logger("app")
@@ -28,6 +29,8 @@ if "messages" not in st.session_state:
     st.session_state.messages = []
 if "index_built" not in st.session_state:
     st.session_state.index_built = False
+if "auto_update" not in st.session_state:
+    st.session_state.auto_update = False
 
 
 def init_indexer():
@@ -56,6 +59,9 @@ def build_index_callback(indexer):
         try:
             count = indexer.build_from_papers()
             st.session_state.index_built = True
+            # 更新缓存
+            cache = PaperCache()
+            cache.update()
             st.success(f"索引构建完成！共 {count} 个文本块")
             logger.info(f"索引构建完成：{count} 个文本块")
         except Exception as e:
@@ -114,6 +120,38 @@ with st.sidebar:
     # 索引管理
     st.subheader("🔧 索引管理")
 
+    # 自动更新选项
+    auto_update = st.checkbox(
+        "自动更新索引",
+        value=st.session_state.auto_update,
+        key="auto_update_toggle",
+        help="开启后，当检测到论文文件变动时自动更新索引"
+    )
+    st.session_state.auto_update = auto_update
+
+    # 文件变动检测
+    if auto_update:
+        cache = PaperCache()
+        changes = cache.detect_changes()
+        has_changes = any([changes["added"], changes["removed"], changes["modified"]])
+
+        if has_changes:
+            if st.button("🔄 检测到变动，点击更新索引", type="primary", use_container_width=True):
+                indexer = init_indexer()
+                stats = indexer.update_incremental(changes)
+                cache.update()
+                st.session_state.index_built = True
+                if stats["added"] + stats["modified"] > 0:
+                    st.success(f"更新完成：新增 {stats['added']} 块，修改 {stats['modified']} 块")
+                if stats["removed"] > 0:
+                    st.info(f"删除 {stats['removed']} 个文件的索引")
+                if stats["errors"]:
+                    for err in stats["errors"]:
+                        st.warning(err)
+                st.rerun()
+        else:
+            st.success("✅ 文件已是最新")
+
     col1, col2 = st.columns(2)
     with col1:
         if st.button("📦 构建索引", use_container_width=True):
@@ -128,6 +166,7 @@ with st.sidebar:
                 storage_dir.mkdir(parents=True, exist_ok=True)
                 st.session_state.index_built = False
                 st.success("索引已清除")
+                st.rerun()
 
     # 索引状态
     if st.session_state.index_built:

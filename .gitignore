@@ -44,3 +44,5 @@ storage/*
 data/papers/*
 !data/papers/.gitkeep
 logs/
+.claude/
+.paper_cache.json
