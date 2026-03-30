@@ -5,8 +5,18 @@ import chromadb
 import httpx
 import hashlib
 
-from .config import CHROMA_PERSIST_DIR, CHUNK_SIZE, CHUNK_OVERLAP, EMBEDDING_API_KEY, EMBEDDING_API_BASE, EMBEDDING_MODEL
+from .config import (
+    CHROMA_PERSIST_DIR,
+    CHUNK_SIZE,
+    CHUNK_OVERLAP,
+    EMBEDDING_API_KEY,
+    EMBEDDING_API_BASE,
+    EMBEDDING_MODEL,
+    MIN_CHUNK_LENGTH,
+    USE_SEMANTIC_CHUNKING,
+)
 from .parser import parse_all_papers, parse_pdf, PaperSection
+from .semantic_chunker import SemanticChunker, SemanticChunk
 from .logger import get_logger
 from .errors import IndexError, handle_error
 
@@ -15,7 +25,7 @@ logger = get_logger("indexer")
 
 def split_text(text: str, chunk_size: int = CHUNK_SIZE, chunk_overlap: int = CHUNK_OVERLAP) -> List[str]:
     """
-    将文本分割成块
+    将文本分割成块（固定大小切分）
 
     Args:
         text: 待分割的文本
@@ -46,6 +56,36 @@ def split_text(text: str, chunk_size: int = CHUNK_SIZE, chunk_overlap: int = CHU
         start += chunk_size - chunk_overlap
 
     return chunks
+
+
+def split_text_smart(text: str, **kwargs) -> List[str]:
+    """
+    智能文本分割（根据配置选择固定大小或语义切分）
+
+    Args:
+        text: 待分割的文本
+        **kwargs: 额外参数
+
+    Returns:
+        文本块列表
+    """
+    if USE_SEMANTIC_CHUNKING:
+        # 使用语义切分
+        chunker = SemanticChunker()
+        # 包装成 PaperSection 格式
+        from .parser import PaperSection
+        section = PaperSection(
+            title="",
+            content=text,
+            page_num=0,
+            metadata={}
+        )
+        chunks = chunker.chunk([section])
+        return [chunk.content for chunk in chunks]
+    else:
+        # 使用固定大小切分
+        return split_text(text, chunk_size=kwargs.get('chunk_size', CHUNK_SIZE),
+                               chunk_overlap=kwargs.get('chunk_overlap', CHUNK_OVERLAP))
 
 
 class Indexer:
@@ -130,25 +170,53 @@ class Indexer:
         all_metadatas = []
         all_embeddings = []
 
-        for i, section in enumerate(sections):
-            # 分割文本
-            chunks = split_text(section.content)
+        if USE_SEMANTIC_CHUNKING:
+            # 使用语义切分
+            logger.info("使用语义切分模式")
+            print("使用语义切分模式...")
+            chunker = SemanticChunker()
+            semantic_chunks = chunker.chunk(sections)
 
-            for j, chunk in enumerate(chunks):
-                if not chunk.strip():
+            for i, chunk in enumerate(semantic_chunks):
+                if not chunk.content.strip():
+                    continue
+                if len(chunk.content) < MIN_CHUNK_LENGTH:
                     continue
 
-                chunk_id = f"{section.metadata.get('source', 'unknown')}_{section.page_num}_{i}_{j}"
-                metadata = {
-                    "source": section.metadata.get("source", "unknown"),
-                    "file_path": section.metadata.get("file_path", ""),
-                    "page_num": section.page_num,
-                    "section_title": section.title
-                }
-
-                all_chunks.append(chunk)
+                chunk_id = f"{chunk.metadata.get('source', 'unknown')}_{chunk.metadata.get('page_num', 0)}_{i}"
+                all_chunks.append(chunk.content)
                 all_ids.append(chunk_id)
-                all_metadatas.append(metadata)
+                all_metadatas.append({
+                    "source": chunk.metadata.get("source", "unknown"),
+                    "file_path": chunk.metadata.get("file_path", ""),
+                    "page_num": chunk.metadata.get("page_num", 0),
+                    "section_title": chunk.metadata.get("section_title", ""),
+                    "chunk_type": "semantic",
+                    "avg_similarity": chunk.avg_internal_similarity,
+                })
+        else:
+            # 使用固定大小切分
+            for i, section in enumerate(sections):
+                # 分割文本
+                chunks = split_text(section.content)
+
+                for j, chunk in enumerate(chunks):
+                    if not chunk.strip():
+                        continue
+                    if len(chunk) < MIN_CHUNK_LENGTH:
+                        continue
+
+                    chunk_id = f"{section.metadata.get('source', 'unknown')}_{section.page_num}_{i}_{j}"
+                    metadata = {
+                        "source": section.metadata.get("source", "unknown"),
+                        "file_path": section.metadata.get("file_path", ""),
+                        "page_num": section.page_num,
+                        "section_title": section.title
+                    }
+
+                    all_chunks.append(chunk)
+                    all_ids.append(chunk_id)
+                    all_metadatas.append(metadata)
 
         # 批量生成嵌入向量（使用智谱 AI API）
         if all_chunks:

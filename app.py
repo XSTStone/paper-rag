@@ -23,13 +23,31 @@ st.set_page_config(
     layout="wide"
 )
 
+def check_index_status() -> bool:
+    """检查索引是否已构建"""
+    try:
+        from src.config import CHROMA_PERSIST_DIR
+        from pathlib import Path
+        import chromadb
+
+        persist_dir = Path(CHROMA_PERSIST_DIR)
+        if not persist_dir.exists():
+            return False
+
+        client = chromadb.PersistentClient(path=str(persist_dir))
+        collection = client.get_collection(name="papers")
+        count = collection.count()
+        return count > 0
+    except Exception as e:
+        logger.debug(f"检查索引状态失败：{e}")
+        return False
+
+
 # 初始化 session state
 if "conversation_id" not in st.session_state:
     st.session_state.conversation_id = str(uuid.uuid4())
 if "messages" not in st.session_state:
     st.session_state.messages = []
-if "index_built" not in st.session_state:
-    st.session_state.index_built = False
 if "auto_update" not in st.session_state:
     st.session_state.auto_update = False
 if "rag_trace_data" not in st.session_state:
@@ -38,6 +56,9 @@ if "show_visualizer" not in st.session_state:
     st.session_state.show_visualizer = False
 if "trace_query" not in st.session_state:
     st.session_state.trace_query = ""
+
+# 每次加载时检查索引状态
+st.session_state.index_built = check_index_status()
 
 
 def init_indexer():

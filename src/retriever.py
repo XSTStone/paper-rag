@@ -5,7 +5,7 @@ import chromadb
 import httpx
 import hashlib
 
-from .config import CHROMA_PERSIST_DIR, TOP_K, EMBEDDING_API_KEY, EMBEDDING_API_BASE, EMBEDDING_MODEL
+from .config import CHROMA_PERSIST_DIR, TOP_K, EMBEDDING_API_KEY, EMBEDDING_API_BASE, EMBEDDING_MODEL, MIN_CHUNK_LENGTH
 from .logger import get_logger
 from .cache import embedding_cache
 from .errors import RetrievalError, handle_error
@@ -134,19 +134,41 @@ class Retriever:
             # 生成查询嵌入
             query_embedding = self._embedding_fn([query])[0]
 
-            # 执行检索
-            results = self.collection.query(
+            # 执行检索，先只获取 IDs 和距离（避免 ChromaDB query 返回截断的文档）
+            # 获取更多的候选结果用于过滤（因为短文档会被过滤掉）
+            candidate_k = k * 10
+            query_results = self.collection.query(
                 query_embeddings=[query_embedding],
-                n_results=k,
-                include=["documents", "metadatas", "distances"]
+                n_results=candidate_k,
+                include=["distances", "metadatas"]
             )
 
             # 解析结果
             search_results = []
-            if results["documents"] and results["documents"][0]:
-                for i, doc in enumerate(results["documents"][0]):
-                    metadata = results["metadatas"][0][i] if results["metadatas"] else {}
-                    distance = results["distances"][0][i] if results["distances"] else 0
+            if query_results["ids"] and query_results["ids"][0]:
+                # 用 get 获取完整的文档内容
+                ids_to_get = query_results["ids"][0]
+                full_docs = self.collection.get(
+                    ids=ids_to_get,
+                    include=["documents", "metadatas"]
+                )
+
+                distances = query_results["distances"][0] if query_results["distances"] else []
+
+                for i, doc_id in enumerate(ids_to_get):
+                    # 从 get 结果中查找对应的文档
+                    doc_idx = full_docs["ids"].index(doc_id) if doc_id in full_docs["ids"] else -1
+                    if doc_idx == -1:
+                        continue
+
+                    doc = full_docs["documents"][doc_idx]
+                    metadata = full_docs["metadatas"][doc_idx] if full_docs["metadatas"] else {}
+                    distance = distances[i] if i < len(distances) else 0
+
+                    # 过滤掉过短的文档
+                    if len(doc) < MIN_CHUNK_LENGTH:
+                        continue
+
                     # 余弦距离转相似度：similarity = 1 - distance
                     score = 1 - distance
 
@@ -158,6 +180,10 @@ class Retriever:
                         score=score,
                         metadata=metadata
                     ))
+
+            # 按相似度排序，返回 top_k
+            search_results.sort(key=lambda x: x.score, reverse=True)
+            search_results = search_results[:k]
 
             logger.info(f"检索到 {len(search_results)} 条结果")
             return search_results
@@ -193,20 +219,33 @@ class Retriever:
         if source_filter:
             where_filter = {"source": source_filter}
 
-        # 执行检索
-        results = self.collection.query(
+        # 执行检索，先只获取 IDs 和距离
+        query_results = self.collection.query(
             query_embeddings=[query_embedding],
             n_results=k,
             where=where_filter,
-            include=["documents", "metadatas", "distances"]
+            include=["distances", "metadatas"]
         )
 
-        # 解析结果
+        # 用 get 获取完整的文档内容
         search_results = []
-        if results["documents"] and results["documents"][0]:
-            for i, doc in enumerate(results["documents"][0]):
-                metadata = results["metadatas"][0][i] if results["metadatas"] else {}
-                distance = results["distances"][0][i] if results["distances"] else 0
+        if query_results["ids"] and query_results["ids"][0]:
+            ids_to_get = query_results["ids"][0]
+            full_docs = self.collection.get(
+                ids=ids_to_get,
+                include=["documents", "metadatas"]
+            )
+
+            distances = query_results["distances"][0] if query_results["distances"] else []
+
+            for i, doc_id in enumerate(ids_to_get):
+                doc_idx = full_docs["ids"].index(doc_id) if doc_id in full_docs["ids"] else -1
+                if doc_idx == -1:
+                    continue
+
+                doc = full_docs["documents"][doc_idx]
+                metadata = full_docs["metadatas"][doc_idx] if full_docs["metadatas"] else {}
+                distance = distances[i] if i < len(distances) else 0
                 score = 1 - distance
 
                 search_results.append(SearchResult(

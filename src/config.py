@@ -31,7 +31,19 @@ CHUNK_SIZE = 512
 # 分块重叠大小
 CHUNK_OVERLAP = 50
 # 检索返回的最大文档数
-TOP_K = 5
+TOP_K = 10
+# 最小文档长度（过滤过短的文档块）
+MIN_CHUNK_LENGTH = 20
+
+# ============= 语义切分配置 =============
+# 语义相似度阈值（低于此值认为是语义边界）
+SEMANTIC_SIMILARITY_THRESHOLD = 0.65
+# 每块最少句子数
+MIN_SENTENCES_PER_CHUNK = 2
+# 每块最多句子数
+MAX_SENTENCES_PER_CHUNK = 8
+# 是否启用语义切分（设为 True 启用）
+USE_SEMANTIC_CHUNKING = True
 
 # ============= 验证配置 =============
 def validate_config():
