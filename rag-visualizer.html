@@ -1,0 +1,681 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RAG 可视化追踪</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0a0c10;
+  --bg2: #0f1218;
+  --bg3: #151a22;
+  --bg4: #1c2330;
+  --border: rgba(255,255,255,0.07);
+  --border2: rgba(255,255,255,0.12);
+  --text: #e8eaf0;
+  --text2: #8892a4;
+  --text3: #4a5568;
+  --accent: #3b82f6;
+  --accent2: #60a5fa;
+  --accent-bg: rgba(59,130,246,0.1);
+  --accent-border: rgba(59,130,246,0.25);
+  --green: #10b981;
+  --green-bg: rgba(16,185,129,0.1);
+  --green-border: rgba(16,185,129,0.25);
+  --amber: #f59e0b;
+  --amber-bg: rgba(245,158,11,0.1);
+  --amber-border: rgba(245,158,11,0.25);
+  --purple: #8b5cf6;
+  --purple-bg: rgba(139,92,246,0.1);
+  --purple-border: rgba(139,92,246,0.25);
+  --coral: #f43f5e;
+  --coral-bg: rgba(244,63,94,0.1);
+  --coral-border: rgba(244,63,94,0.25);
+  --mono: 'JetBrains Mono', monospace;
+  --sans: 'Syne', sans-serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+.app {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  grid-template-rows: 56px 1fr;
+  min-height: 100vh;
+}
+
+/* TOPBAR */
+.topbar {
+  grid-column: 1/-1;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 24px;
+  gap: 16px;
+}
+.topbar-logo {
+  font-family: var(--sans);
+  font-weight: 800;
+  font-size: 15px;
+  color: var(--text);
+  letter-spacing: -0.02em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.topbar-logo .dot {
+  width: 8px; height: 8px;
+  background: var(--accent);
+  border-radius: 50%;
+  animation: pulse 2s infinite;
+}
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+.query-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg3);
+  border: 1px solid var(--border2);
+  border-radius: 6px;
+  padding: 6px 12px;
+  flex: 1;
+  max-width: 500px;
+}
+.query-bar input {
+  background: none;
+  border: none;
+  outline: none;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text);
+  flex: 1;
+  min-width: 0;
+}
+.query-bar input::placeholder { color: var(--text3); }
+.run-btn {
+  background: var(--accent);
+  border: none;
+  border-radius: 5px;
+  color: #fff;
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 14px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.run-btn:hover { background: var(--accent2); transform: translateY(-1px); }
+
+/* SIDEBAR */
+.sidebar {
+  background: var(--bg2);
+  border-right: 1px solid var(--border);
+  padding: 20px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.stage-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+  border: 1px solid transparent;
+}
+.stage-nav-item:hover { background: var(--bg3); }
+.stage-nav-item.active {
+  background: var(--accent-bg);
+  border-color: var(--accent-border);
+}
+.stage-icon {
+  width: 28px; height: 28px;
+  border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+.stage-nav-text { flex: 1; min-width: 0; }
+.stage-nav-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  display: block;
+}
+.stage-nav-item.active .stage-nav-name { color: var(--accent2); }
+.stage-nav-sub {
+  font-size: 10px;
+  color: var(--text3);
+  font-family: var(--mono);
+  display: block;
+  margin-top: 1px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* MAIN */
+.main {
+  overflow-y: auto;
+  padding: 24px 28px;
+  background: var(--bg);
+}
+
+.panel { display: none; }
+.panel.active { display: block; }
+
+.panel-head { margin-bottom: 24px; }
+.panel-title {
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--text);
+  letter-spacing: -0.03em;
+  margin-bottom: 8px;
+}
+.panel-desc {
+  font-size: 13px;
+  color: var(--text2);
+  font-family: var(--mono);
+  line-height: 1.6;
+}
+
+/* IO CARD */
+.io-card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  margin-bottom: 16px;
+}
+.io-card-head {
+  padding: 10px 16px;
+  background: var(--bg3);
+  border-bottom: 1px solid var(--border);
+  font-size: 10px;
+  font-family: var(--mono);
+  color: var(--text3);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.io-body {
+  padding: 14px 16px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.8;
+  color: var(--text2);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.c-key { color: #60a5fa; }
+.c-str { color: #34d399; }
+.c-num { color: #f59e0b; }
+.c-cmt { color: #374151; }
+
+/* CHUNK ITEM */
+.chunk-list { display: flex; flex-direction: column; gap: 8px; }
+.chunk-item {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 6px 6px 0;
+  padding: 12px 14px;
+}
+.chunk-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+.chunk-id { font-size: 10px; font-family: var(--mono); color: var(--accent2); }
+.chunk-stat { font-size: 10px; font-family: var(--mono); color: var(--text3); }
+.chunk-text { font-size: 12px; font-family: var(--mono); color: var(--text2); line-height: 1.6; }
+
+/* RESULT ITEM */
+.result-list { display: flex; flex-direction: column; gap: 8px; }
+.result-item {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: grid;
+  grid-template-columns: 24px 1fr auto;
+  gap: 12px;
+  align-items: start;
+}
+.result-item:hover { border-color: var(--border2); background: var(--bg4); }
+.result-rank { font-size: 11px; font-family: var(--mono); color: var(--text3); }
+.result-item.top1 .result-rank { color: var(--green); }
+.result-text { font-size: 12px; font-family: var(--mono); color: var(--text2); line-height: 1.6; }
+.result-score { font-size: 14px; font-family: var(--mono); font-weight: 500; color: var(--text); }
+.result-item.top1 .result-score { color: var(--green); }
+
+/* FINAL ANSWER */
+.final-answer {
+  background: var(--bg2);
+  border: 1px solid var(--green-border);
+  border-radius: 10px;
+  padding: 18px 20px;
+  margin-bottom: 16px;
+}
+.final-answer-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.final-answer-dot {
+  width: 8px; height: 8px;
+  background: var(--green);
+  border-radius: 50%;
+  animation: pulse 2s infinite;
+}
+.final-answer-title { font-size: 11px; font-family: var(--mono); color: var(--green); text-transform: uppercase; letter-spacing: 0.08em; }
+.final-answer-text { font-size: 13px; color: var(--text); line-height: 1.8; font-family: var(--mono); }
+
+/* PIPELINE OVERVIEW */
+.pipeline-overview {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  margin-bottom: 24px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 4px;
+  overflow-x: auto;
+}
+.pipe-step {
+  flex: 1;
+  min-width: 80px;
+  padding: 10px 8px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: all 0.15s;
+  text-align: center;
+}
+.pipe-step:hover { background: var(--bg3); }
+.pipe-step.active { background: var(--accent-bg); }
+.pipe-step-num { font-size: 9px; font-family: var(--mono); color: var(--text3); margin-bottom: 2px; }
+.pipe-step.active .pipe-step-num { color: var(--accent); }
+.pipe-step-name { font-size: 11px; font-weight: 600; color: var(--text2); white-space: nowrap; }
+.pipe-step.active .pipe-step-name { color: var(--accent2); }
+.pipe-sep { font-size: 14px; color: var(--text3); flex-shrink: 0; padding: 0 2px; }
+
+/* LOADING */
+.loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  color: var(--text3);
+  font-family: var(--mono);
+  font-size: 13px;
+}
+.loading-spinner {
+  width: 20px; height: 20px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-right: 12px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ERROR */
+.error-box {
+  background: rgba(244,63,94,0.1);
+  border: 1px solid rgba(244,63,94,0.3);
+  border-radius: 8px;
+  padding: 16px 18px;
+  color: #f43f5e;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.6;
+}
+</style>
+</head>
+<body>
+<div class="app">
+
+<!-- TOPBAR -->
+<header class="topbar">
+  <div class="topbar-logo">
+    <div class="dot"></div>
+    RAG Visualizer
+  </div>
+  <div class="query-bar">
+    <input type="text" id="globalQuery" placeholder="输入查询问题..." value="">
+  </div>
+  <button class="run-btn" onclick="runTrace()">追踪 RAG 流程 →</button>
+</header>
+
+<!-- SIDEBAR -->
+<aside class="sidebar">
+  <div class="stage-nav-item active" id="nav0" onclick="goTo(0)">
+    <div class="stage-icon" style="background:var(--accent-bg);color:var(--accent2)">📄</div>
+    <div class="stage-nav-text">
+      <span class="stage-nav-name">文档分块</span>
+      <span class="stage-nav-sub">解析 · 清洗 · 切分</span>
+    </div>
+  </div>
+  <div class="stage-nav-item" id="nav1" onclick="goTo(1)">
+    <div class="stage-icon" style="background:var(--amber-bg);color:var(--amber)">⚡</div>
+    <div class="stage-nav-text">
+      <span class="stage-nav-name">检索结果</span>
+      <span class="stage-nav-sub">向量搜索 · 排序</span>
+    </div>
+  </div>
+  <div class="stage-nav-item" id="nav2" onclick="goTo(2)">
+    <div class="stage-icon" style="background:var(--purple-bg);color:var(--purple)">📝</div>
+    <div class="stage-nav-text">
+      <span class="stage-nav-name">Prompt 构建</span>
+      <span class="stage-nav-sub">上下文组装</span>
+    </div>
+  </div>
+  <div class="stage-nav-item" id="nav3" onclick="goTo(3)">
+    <div class="stage-icon" style="background:var(--coral-bg);color:var(--coral)">✨</div>
+    <div class="stage-nav-text">
+      <span class="stage-nav-name">最终答案</span>
+      <span class="stage-nav-sub">LLM 生成</span>
+    </div>
+  </div>
+</aside>
+
+<!-- MAIN -->
+<main class="main">
+
+<!-- PIPELINE OVERVIEW -->
+<div class="pipeline-overview">
+  <div class="pipe-step active" data-step="0" onclick="goTo(0)">
+    <div class="pipe-step-num">Step 1</div>
+    <div class="pipe-step-name">分块</div>
+  </div>
+  <div class="pipe-sep">→</div>
+  <div class="pipe-step" data-step="1" onclick="goTo(1)">
+    <div class="pipe-step-num">Step 2</div>
+    <div class="pipe-step-name">检索</div>
+  </div>
+  <div class="pipe-sep">→</div>
+  <div class="pipe-step" data-step="2" onclick="goTo(2)">
+    <div class="pipe-step-num">Step 3</div>
+    <div class="pipe-step-name">Prompt</div>
+  </div>
+  <div class="pipe-sep">→</div>
+  <div class="pipe-step" data-step="3" onclick="goTo(3)">
+    <div class="pipe-step-num">Step 4</div>
+    <div class="pipe-step-name">答案</div>
+  </div>
+</div>
+
+<!-- PANEL 0: CHUNKS -->
+<div class="panel active" id="panel0">
+  <div class="panel-head">
+    <div class="panel-title">📄 文档分块结果</div>
+    <div class="panel-desc">将检索到的相关文档切分为适合向量化的小块</div>
+  </div>
+  <div id="panel0-content">
+    <div class="loading"><div class="loading-spinner"></div>等待追踪...</div>
+  </div>
+</div>
+
+<!-- PANEL 1: RETRIEVAL -->
+<div class="panel" id="panel1">
+  <div class="panel-head">
+    <div class="panel-title">⚡ 检索结果</div>
+    <div class="panel-desc">基于向量相似度搜索到的 Top-K 文档块</div>
+  </div>
+  <div id="panel1-content">
+    <div class="loading"><div class="loading-spinner"></div>等待追踪...</div>
+  </div>
+</div>
+
+<!-- PANEL 2: PROMPT -->
+<div class="panel" id="panel2">
+  <div class="panel-head">
+    <div class="panel-title">📝 Prompt 构建</div>
+    <div class="panel-desc">组装 System Prompt + 检索上下文 + 用户问题</div>
+  </div>
+  <div id="panel2-content">
+    <div class="loading"><div class="loading-spinner"></div>等待追踪...</div>
+  </div>
+</div>
+
+<!-- PANEL 3: ANSWER -->
+<div class="panel" id="panel3">
+  <div class="panel-head">
+    <div class="panel-title">✨ 最终答案</div>
+    <div class="panel-desc">LLM 基于检索结果生成的答案</div>
+  </div>
+  <div id="panel3-content">
+    <div class="loading"><div class="loading-spinner"></div>等待追踪...</div>
+  </div>
+</div>
+
+</main>
+</div>
+
+<script>
+// 全局状态
+let ragData = null;
+let currentPanel = 0;
+
+// 从 Streamlit 获取数据
+async function runTrace() {
+  const query = document.getElementById('globalQuery').value;
+  if (!query.trim()) {
+    alert('请输入查询问题');
+    return;
+  }
+
+  // 显示加载状态
+  showLoading();
+
+  try {
+    // 尝试从 Streamlit 获取数据
+    const response = await fetch('/api/trace', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: query })
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    ragData = data;
+    renderAll();
+
+  } catch (error) {
+    showError(error.message);
+  }
+}
+
+function showLoading() {
+  document.getElementById('panel0-content').innerHTML =
+    '<div class="loading"><div class="loading-spinner"></div>正在执行 RAG 流程...</div>';
+  document.getElementById('panel1-content').innerHTML =
+    '<div class="loading"><div class="loading-spinner"></div>正在检索文档...</div>';
+  document.getElementById('panel2-content').innerHTML =
+    '<div class="loading"><div class="loading-spinner"></div>正在构建 Prompt...</div>';
+  document.getElementById('panel3-content').innerHTML =
+    '<div class="loading"><div class="loading-spinner"></div>正在生成答案...</div>';
+}
+
+function showError(msg) {
+  const html = `<div class="error-box">❌ 加载失败：${msg}</div>`;
+  document.getElementById('panel0-content').innerHTML = html;
+  document.getElementById('panel1-content').innerHTML = html;
+  document.getElementById('panel2-content').innerHTML = html;
+  document.getElementById('panel3-content').innerHTML = html;
+}
+
+function renderAll() {
+  renderPanel0();
+  renderPanel1();
+  renderPanel2();
+  renderPanel3();
+}
+
+function renderPanel0() {
+  if (!ragData || !ragData.chunks) return;
+
+  const chunks = ragData.chunks;
+  const html = `
+    <div class="io-card">
+      <div class="io-card-head">📊 分块统计：${chunks.length} 个文本块</div>
+      <div class="io-body">${JSON.stringify({ total_chunks: chunks.length, chunk_size: 512, overlap: 50 }, null, 2)}</div>
+    </div>
+    <div class="chunk-list">
+      ${chunks.map((chunk, i) => `
+        <div class="chunk-item" style="border-left-color: ${getChunkColor(i)}">
+          <div class="chunk-meta">
+            <span class="chunk-id" style="color: ${getChunkColor(i)}">chunk_${String(i+1).padStart(3,'0')}</span>
+            <span class="chunk-stat">${chunk.content?.length || 0} chars</span>
+            <span class="chunk-stat">${chunk.source || 'unknown'}</span>
+            <span class="chunk-stat">P${chunk.page_num + 1}</span>
+          </div>
+          <div class="chunk-text">${escapeHtml(chunk.content || chunk.text || '')}</div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+  document.getElementById('panel0-content').innerHTML = html;
+}
+
+function renderPanel1() {
+  if (!ragData || !ragData.results) return;
+
+  const results = ragData.results;
+  const html = `
+    <div class="io-card">
+      <div class="io-card-head">🎯 检索统计：Top-${results.length}</div>
+      <div class="io-body">${JSON.stringify({ top_k: results.length, max_score: results[0]?.score || 0 }, null, 2)}</div>
+    </div>
+    <div class="result-list">
+      ${results.map((r, i) => `
+        <div class="result-item ${i === 0 ? 'top1' : ''}">
+          <div class="result-rank">#${i + 1}</div>
+          <div>
+            <div style="font-size:10px;font-family:var(--mono);color:var(--accent);margin-bottom:4px">
+              ${r.source} · 第${r.page_num + 1}页
+            </div>
+            <div class="result-text">${escapeHtml(r.content || '')}</div>
+          </div>
+          <div class="result-score">Score: ${r.score?.toFixed(3) || '0.000'}</div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+  document.getElementById('panel1-content').innerHTML = html;
+}
+
+function renderPanel2() {
+  if (!ragData || !ragData.prompt) return;
+
+  const html = `
+    <div class="io-card">
+      <div class="io-card-head">🔧 System Prompt</div>
+      <div class="io-body"><span class="c-cmt">// 系统指令</span>\n${escapeHtml(ragData.system_prompt || '你是一个论文检索助手...')}</div>
+    </div>
+    <div class="io-card">
+      <div class="io-card-head">📎 检索上下文 (Context)</div>
+      <div class="io-body"><span class="c-cmt">// Top-${ragData.results?.length || 0} 检索结果</span>\n${escapeHtml(ragData.prompt || '')}</div>
+    </div>
+    <div class="io-card">
+      <div class="io-card-head">❓ 用户问题</div>
+      <div class="io-body"><span class="c-key">query</span>: <span class="c-str">"${escapeHtml(ragData.query || '')}"</span></div>
+    </div>
+  `;
+  document.getElementById('panel2-content').innerHTML = html;
+}
+
+function renderPanel3() {
+  if (!ragData || !ragData.answer) return;
+
+  const html = `
+    <div class="final-answer">
+      <div class="final-answer-head">
+        <div class="final-answer-dot"></div>
+        <div class="final-answer-title">LLM 生成答案</div>
+      </div>
+      <div class="final-answer-text">${escapeHtml(ragData.answer || '')}</div>
+      ${ragData.sources && ragData.sources.length > 0 ? `
+        <div style="margin-top:16px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.06)">
+          <div style="font-size:10px;font-family:var(--mono);color:var(--text3);margin-bottom:8px">📎 引用来源</div>
+          ${ragData.sources.map((s, i) => `
+            <div style="font-size:11px;font-family:var(--mono);color:var(--text2);margin-bottom:6px">
+              ${i+1}. ${s.source} (P${s.page_num + 1}) - Score: ${s.score?.toFixed(3)}
+            </div>
+          `).join('')}
+        </div>
+      ` : ''}
+    </div>
+  `;
+  document.getElementById('panel3-content').innerHTML = html;
+}
+
+function goTo(panelIndex) {
+  currentPanel = panelIndex;
+  document.querySelectorAll('.panel').forEach((p, i) => {
+    p.classList.toggle('active', i === panelIndex);
+  });
+  document.querySelectorAll('.stage-nav-item').forEach((n, i) => {
+    n.classList.toggle('active', i === panelIndex);
+  });
+  document.querySelectorAll('.pipe-step').forEach((s, i) => {
+    s.classList.toggle('active', i === panelIndex);
+  });
+}
+
+function getChunkColor(i) {
+  const colors = ['#3b82f6', '#10b981', '#8b5cf6', '#f59e0b', '#f43f5e'];
+  return colors[i % colors.length];
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+// 初始化：检查是否有注入的初始数据
+window.addEventListener('DOMContentLoaded', () => {
+  // 检查是否有注入的 ragData (从 Streamlit 注入)
+  if (window.ragData) {
+    console.log('使用注入的 RAG 数据');
+    // 设置输入框的值
+    document.getElementById('globalQuery').value = window.ragData.query || '';
+    renderAll();
+    goTo(0);
+  }
+
+  // 检查是否通过 postMessage 接收数据
+  window.addEventListener('message', (event) => {
+    if (event.data && event.data.type === 'rag-data') {
+      window.ragData = event.data.data;
+      document.getElementById('globalQuery').value = window.ragData.query || '';
+      renderAll();
+      goTo(0);
+    }
+  });
+});
+</script>
+</body>
+</html>

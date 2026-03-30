@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import shutil
 import uuid
+import json
 
 from src.config import DATA_DIR, CHROMA_PERSIST_DIR, validate_config
 from src.indexer import Indexer
@@ -31,6 +32,12 @@ if "index_built" not in st.session_state:
     st.session_state.index_built = False
 if "auto_update" not in st.session_state:
     st.session_state.auto_update = False
+if "rag_trace_data" not in st.session_state:
+    st.session_state.rag_trace_data = None
+if "show_visualizer" not in st.session_state:
+    st.session_state.show_visualizer = False
+if "trace_query" not in st.session_state:
+    st.session_state.trace_query = ""
 
 
 def init_indexer():
@@ -74,6 +81,79 @@ def clear_chat():
     """清除聊天记录"""
     st.session_state.messages = []
     st.session_state.conversation_id = str(uuid.uuid4())
+
+
+def run_rag_trace(query: str) -> dict:
+    """
+    执行 RAG 流程追踪，收集中间数据
+
+    Args:
+        query: 用户查询
+
+    Returns:
+        包含 RAG 流程完整数据的字典
+    """
+    try:
+        engine = init_query_engine()
+
+        # 1. 执行检索
+        search_results = engine.retriever.search(query, top_k=5)
+
+        # 2. 构建 prompt
+        context = search_results[:5]
+        prompt = engine._build_prompt(query, context)
+
+        # 3. 调用 LLM
+        system_prompt = "你是一个论文检索助手，基于提供的论文内容回答用户问题。"
+        answer = engine._call_llm(prompt, system_prompt=system_prompt)
+
+        # 4. 组装追踪数据
+        trace_data = {
+            "query": query,
+            "chunks": [
+                {
+                    "id": f"chunk_{i+1:03d}",
+                    "content": r.content,
+                    "source": r.source,
+                    "page_num": r.page_num,
+                    "score": round(r.score, 4)
+                }
+                for i, r in enumerate(search_results)
+            ],
+            "results": [
+                {
+                    "id": f"result_{i+1:03d}",
+                    "content": r.content,
+                    "source": r.source,
+                    "page_num": r.page_num,
+                    "score": round(r.score, 4)
+                }
+                for i, r in enumerate(search_results)
+            ],
+            "system_prompt": system_prompt,
+            "prompt": prompt,
+            "answer": answer,
+            "sources": [
+                {
+                    "source": r.source,
+                    "page_num": r.page_num,
+                    "score": round(r.score, 4)
+                }
+                for r in search_results
+            ],
+            "stats": {
+                "total_chunks": len(search_results),
+                "top_k": 5,
+                "max_score": round(search_results[0].score, 4) if search_results else 0
+            }
+        }
+
+        return trace_data
+
+    except Exception as e:
+        logger.error(f"RAG 追踪失败：{e}")
+        st.error(f"追踪失败：{handle_error(e)}")
+        return None
 
 
 # ============= 侧边栏 =============
@@ -184,6 +264,37 @@ with st.sidebar:
 
     st.divider()
 
+    # 可视化追踪
+    st.subheader("🔍 可视化追踪")
+    st.markdown("查看 RAG 流程的内部工作原理")
+
+    trace_query = st.text_input(
+        "输入追踪查询",
+        value=st.session_state.trace_query,
+        placeholder="请输入问题...",
+        key="trace_input"
+    )
+
+    if st.button("▶️ 开始追踪", use_container_width=True, type="primary"):
+        if not st.session_state.index_built:
+            st.warning("请先构建索引")
+        elif not trace_query.strip():
+            st.warning("请输入查询内容")
+        else:
+            with st.spinner("正在执行 RAG 流程追踪..."):
+                trace_data = run_rag_trace(trace_query)
+                if trace_data:
+                    st.session_state.rag_trace_data = trace_data
+                    st.session_state.show_visualizer = True
+                    st.session_state.trace_query = trace_query
+                    st.rerun()
+
+    if st.session_state.show_visualizer and st.session_state.rag_trace_data:
+        if st.button("👁️ 查看可视化", use_container_width=True):
+            pass  # 下面会处理显示
+
+    st.divider()
+
     # 信息来源
     st.subheader("📊 论文来源")
     try:
@@ -202,6 +313,39 @@ with st.sidebar:
 # ============= 主界面 =============
 st.title("📖 论文检索助手")
 st.markdown("基于 RAG 的论文问答系统，支持自然语言查询和引用溯源")
+
+# 检查是否显示可视化器
+if st.session_state.show_visualizer and st.session_state.rag_trace_data:
+    st.divider()
+    st.subheader("🔍 RAG 流程可视化")
+
+    # 读取可视化器 HTML
+    visualizer_path = Path(__file__).parent / "rag-visualizer.html"
+    if visualizer_path.exists():
+        with open(visualizer_path, "r", encoding="utf-8") as f:
+            html_content = f.read()
+
+        # 将追踪数据注入到 HTML 中
+        trace_data_json = json.dumps(st.session_state.rag_trace_data, ensure_ascii=False)
+
+        # 修改 HTML，注入初始数据
+        html_content = html_content.replace(
+            'window.addEventListener(\'DOMContentLoaded\', () => {',
+            f'window.ragData = {trace_data_json}; console.log("注入 RAG 数据:", window.ragData); window.addEventListener(\'DOMContentLoaded\', () => {{'
+        )
+
+        # 显示可视化器
+        st.components.v1.html(html_content, height=1000, scrolling=True)
+
+        # 添加关闭按钮
+        if st.button("关闭可视化"):
+            st.session_state.show_visualizer = False
+            st.session_state.rag_trace_data = None
+            st.rerun()
+    else:
+        st.error(f"未找到可视化器文件：{visualizer_path}")
+
+st.divider()
 
 # 聊天历史
 for message in st.session_state.messages:
